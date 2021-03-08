@@ -39,8 +39,8 @@ jobs:
       GIO_GPG_PRV_KEY: 'secrethub://gravitee-lab/cicd/graviteebot/gpg/armor_format_private_key'
       GIT_USER_NAME: 'secrethub://gravitee-lab/cicd/graviteebot/git/user/name'
       GIT_USER_EMAIL: 'secrethub://gravitee-lab/cicd/graviteebot/git/user/email'
-      DOCKERHUB_USER_NAME: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-name'
-      DOCKERHUB_USER_TOKEN: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-token'
+      # DOCKERHUB_USER_NAME: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-name'
+      # DOCKERHUB_USER_TOKEN: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-token'
     steps:
       - secrethub/exec:
           command: |
@@ -53,8 +53,8 @@ jobs:
                     echo $GIT_USER_NAME > /tmp/gravit33bot/git_user_name
                     echo $GIT_USER_EMAIL > /tmp/gravit33bot/git_user_email
                     mkdir -p /tmp/gravit33bot/.secrets/dockerhub
-                    echo $DOCKERHUB_USER_NAME > /tmp/gravit33bot/.secrets/dockerhub/user_name
-                    echo $DOCKERHUB_USER_TOKEN > /tmp/gravit33bot/.secrets/dockerhub/user_token
+                    # echo $DOCKERHUB_USER_NAME > /tmp/gravit33bot/.secrets/dockerhub/user_name
+                    # echo $DOCKERHUB_USER_TOKEN > /tmp/gravit33bot/.secrets/dockerhub/user_token
       - run:
           name: "Re-format GPG Keys"
           command: |
