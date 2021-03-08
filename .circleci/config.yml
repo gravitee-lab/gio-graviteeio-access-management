@@ -150,6 +150,7 @@ workflows:
             - secrethub
       - publish_snapshot_to_nexus_job:
           requires:
+            - build_snapshot_job
             - publish_snapshot_to_nexus_approval
             # - secrethub
           filters:
