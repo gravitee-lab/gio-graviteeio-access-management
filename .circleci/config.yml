@@ -144,11 +144,11 @@ workflows:
       - secrethub:
           context: cicd-orchestrator
       - build_snapshot_job
-      - snapshot_to_nexus_approval:
+      - publish_snapshot_to_nexus_approval:
           type: approval
           requires:
             - secrethub
-      - build_snapshot_n_nexus_job:
+      - publish_snapshot_to_nexus_job:
           requires:
             - snapshot_to_nexus_approval
             # - secrethub
