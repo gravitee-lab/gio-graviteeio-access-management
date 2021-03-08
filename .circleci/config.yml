@@ -25,14 +25,137 @@ parameters:
 orbs:
   gravitee: gravitee-io/gravitee@dev:1.0.4
 
+# --- Jobs to perform all workflows
+
+# -- A first job, to fetch secrets, and perisit them to Pipeline workspace
+  secrethub:
+    docker:
+      - image: 'cimg/base:stable'
+    environment:
+      DEV_MAVEN_SETTINGS: 'secrethub://gravitee-lab/cicd/graviteebot/infra/maven/dry-run/artifactory/settings.dev.xml'
+      RELEASE_MAVEN_SETTINGS: 'secrethub://gravitee-lab/cicd/graviteebot/infra/maven/settings.nexus-staging.xml'
+      DRY_RELEASE_MAVEN_SETTINGS: 'secrethub://gravitee-lab/cicd/graviteebot/infra/maven/dry-run/artifactory/settings.xml'
+      GIO_GPG_PUB_KEY: 'secrethub://gravitee-lab/cicd/graviteebot/gpg/armor_format_pub_key'
+      GIO_GPG_PRV_KEY: 'secrethub://gravitee-lab/cicd/graviteebot/gpg/armor_format_private_key'
+      GIT_USER_NAME: 'secrethub://gravitee-lab/cicd/graviteebot/git/user/name'
+      GIT_USER_EMAIL: 'secrethub://gravitee-lab/cicd/graviteebot/git/user/email'
+      DOCKERHUB_USER_NAME: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-name'
+      DOCKERHUB_USER_TOKEN: 'secrethub://gravitee-lab/cicd/graviteebot/infra/dockerhub-user-token'
+    steps:
+      - secrethub/exec:
+          command: |
+                    echo $DEV_MAVEN_SETTINGS > /tmp/.circleci.settings.xml
+                    mkdir -p /tmp/gravit33bot/.secrets/.gungpg
+                    echo $RELEASE_MAVEN_SETTINGS > /tmp/gravit33bot/.secrets/release.settings.xml
+                    echo $DRY_RELEASE_MAVEN_SETTINGS > /tmp/gravit33bot/.secrets/dry.release.settings.xml
+                    echo $GIO_GPG_PUB_KEY > /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.pub.key
+                    echo $GIO_GPG_PRV_KEY > /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.priv.key
+                    echo $GIT_USER_NAME > /tmp/gravit33bot/git_user_name
+                    echo $GIT_USER_EMAIL > /tmp/gravit33bot/git_user_email
+                    mkdir -p /tmp/gravit33bot/.secrets/dockerhub
+                    echo $DOCKERHUB_USER_NAME > /tmp/gravit33bot/.secrets/dockerhub/user_name
+                    echo $DOCKERHUB_USER_TOKEN > /tmp/gravit33bot/.secrets/dockerhub/user_token
+      - run:
+          name: "Re-format GPG Keys"
+          command: |
+                    # Re-format private and public GPG Keys
+                    export PUB_KEY_CONTENT=$(cat /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.pub.key | awk -F '-----BEGIN PGP PUBLIC KEY BLOCK-----' '{print $2}' | awk -F '-----END PGP PUBLIC KEY BLOCK-----' '{print $1}')
+                    echo '-----BEGIN PGP PUBLIC KEY BLOCK-----' > /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.pub.key
+                    echo "$PUB_KEY_CONTENT" | tr ' ' '\n' | tee -a /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.pub.key
+                    sed -i '$ s/$/-----END PGP PUBLIC KEY BLOCK-----/' /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.pub.key
+                    export PRIV_KEY_CONTENT=$(cat /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.priv.key | awk -F '-----BEGIN PGP PRIVATE KEY BLOCK-----' '{print $2}' | awk -F '-----END PGP PUBLIC KEY BLOCK-----' '{print $1}')
+                    echo '-----BEGIN PGP PRIVATE KEY BLOCK-----' > /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.priv.key
+                    echo "$PRIV_KEY_CONTENT" | tr ' ' '\n' | tee -a /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.priv.key
+                    sed -i '$ s/$/-----END PGP PRIVATE KEY BLOCK-----/' /tmp/gravit33bot/.secrets/.gungpg/graviteebot.gpg.priv.key
+      - persist_to_workspace:
+          root: /tmp
+          paths:
+            - .circleci.settings.xml
+            - gravit33bot
+
+# --- The below jobs are invoked on every commit, on all git branhces, but the master branch:
+#     The role of those jobs is to build and publish to nexus public central, the SNAPSHOT version of Gravitee AM.
+  build_snapshot_job:
+    docker:
+      - image: circleci/openjdk:11.0.3-jdk-stretch
+    resource_class: medium
+    steps:
+      - attach_workspace:
+          at: /tmp
+      - checkout
+      - restore_cache:
+          keys:
+            - gio-access-management-snapshot-build-{{ checksum "pom.xml" }}
+            - gio-access-management-snapshot-build
+      - run:
+          name: Maven Test and Package Snapshots
+          command: |
+                    mvn clean verify
+                    # keeping in workspace result of the whole project build
+                    mkdir -p /tmp/saved_build
+                    cp -fR ./* /tmp/saved_build/
+                    # keeping in workspace the .m2
+                    mkdir -p /tmp/saved_m2
+                    cp -fR ${HOME}/.m2/* /tmp/saved_m2/
+      - persist_to_workspace:
+          root: /tmp
+          paths:
+            - .circleci.settings.xml
+            - gravit33bot
+            - saved_build
+            - saved_m2
+  publish_snapshot_to_nexus_job:
+    docker:
+      - image: circleci/openjdk:11.0.3-jdk-stretch
+    resource_class: medium
+    steps:
+      - attach_workspace:
+          at: /tmp
+      - checkout
+      - restore_cache:
+          keys:
+            - gio-access-management-snapshot-deploy-{{ checksum "pom.xml" }}
+            - gio-access-management-snapshot-deploy
+      # + un-comment this one to deploy to private artifactory, before or
+      #   instead of the deploy to nexus public central
+      #
+      # - run:
+          # name: Maven Package and deploy to Artifactory
+          # command: |
+                    # mvn -s /tmp/.circleci.settings.xml -P gio-dev clean deploy
+      - run:
+          name: Maven Package and deploy to nexus snapshots
+          command: |
+                    # restoring .m2
+                    if [ -d ${HOME}/.m2 ]; then
+                      rm -fr ${HOME}/.m2
+                    fi;
+                    mkdir -p ${HOME}/.m2
+                    cp -fR /tmp/saved_m2/* ${HOME}/.m2/
+                    cd /tmp/saved_build
+                    mvn -Duser.home=${HOME} -s /tmp/.circleci.settings.xml clean deploy
+# ---
+
 workflows:
   version: 2.1
-  pull_requests:
-    when:
-      equal: [ pr_build, << pipeline.parameters.gio_action >> ]
+
+  build_snapshot_n_nexus:
     jobs:
-      - gravitee/pr-build:
+      - secrethub:
           context: cicd-orchestrator
+      - build_snapshot_job
+      - snapshot_to_nexus_approval:
+          type: approval
+          requires:
+            - secrethub
+      - build_snapshot_n_nexus_job:
+          requires:
+            # - secrethub
+            - snapshot_to_nexus_approval
+        filters:
+          branches:
+            ignore:
+              - master
   release:
     # see https://circleci.com/docs/2.0/configuration-reference/#logic-statement-examples
     when:
