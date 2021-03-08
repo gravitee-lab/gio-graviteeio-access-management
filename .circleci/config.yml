@@ -147,6 +147,7 @@ workflows:
       - publish_snapshot_to_nexus_approval:
           type: approval
           requires:
+            - build_snapshot_job
             - secrethub
       - publish_snapshot_to_nexus_job:
           requires:
