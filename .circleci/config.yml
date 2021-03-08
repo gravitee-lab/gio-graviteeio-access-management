@@ -150,12 +150,12 @@ workflows:
             - secrethub
       - build_snapshot_n_nexus_job:
           requires:
-            # - secrethub
             - snapshot_to_nexus_approval
-        filters:
-          branches:
-            ignore:
-              - master
+            # - secrethub
+          filters:
+            branches:
+              ignore:
+                - master
   release:
     # see https://circleci.com/docs/2.0/configuration-reference/#logic-statement-examples
     when:
