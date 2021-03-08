@@ -26,7 +26,7 @@ orbs:
   gravitee: gravitee-io/gravitee@dev:1.0.4
 
 # --- Jobs to perform all workflows
-
+jobs:
 # -- A first job, to fetch secrets, and perisit them to Pipeline workspace
   secrethub:
     docker:
