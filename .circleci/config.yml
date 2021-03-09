@@ -9,10 +9,6 @@ parameters:
     type: boolean
     default: true
     description: "Run in dry run mode?"
-  is_a_latest:
-    type: boolean
-    default: false
-    description: "If the Release process runs, will it be a latest? (Used for tagging Container images)"
   maven_profile_id:
     type: string
     default: "gravitee-dry-run"
@@ -25,13 +21,17 @@ parameters:
     type: string
     default: "cicd"
     description: "SecretHub Repo to use to fetch secrets ?"
+  graviteeio_version:
+    type: string
+    default: "cicd"
+    description: "Release version number to use to publish the Docker nightly images ?"
 
 orbs:
   gravitee: gravitee-io/gravitee@dev:1.0.4
   secrethub: secrethub/cli@1.1.0
 # --- Jobs to perform all workflows
 jobs:
-# -- A first job, to fetch secrets, and perisit them to Pipeline workspace
+# -- A first job, to fetch secrets, and persist them to Pipeline workspace
   secrethub:
     docker:
       - image: 'cimg/base:stable'
@@ -159,7 +159,6 @@ jobs:
     resource_class: xlarge
     environment:
       DRY_RUN: << pipeline.parameters.dry_run >>
-      IS_A_LATEST: << pipeline.parameters.is_a_latest >>
       # MAVEN_PROFILE_ID: "gio-release"
       MAVEN_PROFILE_ID: "gravitee-release"
     steps:
@@ -350,6 +349,9 @@ jobs:
                     git config --global user.email "${GIT_USER_EMAIL}"
                     git config --global --list
                     echo "[$0 - Git config] completed "
+      # +++ #
+      # +++ # The git release : git tag , and "prepare next version"
+      # +++ #
       - run:
           name: Git release
           command: |
@@ -495,42 +497,50 @@ jobs:
             fi;
             echo "# -------------------------------------------------------------------------------- #"
 
+  docker_nightly_job:
+    docker:
+      - image: circleci/openjdk:11.0.3-jdk-stretch
+      # - image: circleci/openjdk:11.0.3-jdk-stretch-node
+      # # due to issue of Open JDK 11 with Javadoc see https://bugs.openjdk.java.net/browse/JDK-8212233
+      # - image: circleci/openjdk:13.0.2-jdk-buster
+    resource_class: xlarge
+    environment:
+      DRY_RUN: << pipeline.parameters.dry_run >>
+      GRAVITEEAM_VERSION: << pipeline.parameters.graviteeio_version >>
+      # +++ #
+      # +++ # The Docker Nightly release must happen after the [nexus staging]
+      # +++ #
+      - checkout
       - setup_remote_docker
       - run:
-          name: Build & Publish Docker Image to Docker Hub
+          name: "Build Docker Nightly Images"
           command: |
+            git checkout ${GRAVITEEAM_VERSION}
 
-            # checking that [/tmp/gio.maven.project.release.version] figured out by maven prepare release step is still there
-            echo "############################################################"
-            echo "   Checking that [/tmp/gio.maven.project.release.version]   "
-            echo "   figured out by maven prepare release step is             "
-            echo "             still there                                    "
-            echo "############################################################"
-            ls -allh /tmp/gio.maven.project.release.version
-            export RELEASE_VERSION=$(cat /tmp/gio.maven.project.release.version)
-            export RELEASE_VERSION_MAJOR=$(cat /tmp/gio.maven.project.release.version | awk -F '.' '{print $1}')
-            export RELEASE_VERSION_MINOR=$(cat /tmp/gio.maven.project.release.version | awk -F '.' '{print $2}')
-            export RELEASE_VERSION_PATCH=$(cat /tmp/gio.maven.project.release.version | awk -F '.' '{print $3}')
+            echo " [++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++] "
             echo " [--------------------------------------------------------------------------------] "
+            echo "  DOCKER BUILD GRAVITEE AM VERISON [${GRAVITEEAM_VERSION}] CONTAINER NIGHTLY IMAGES : "
             echo " [--------------------------------------------------------------------------------] "
+            echo " [++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++] "
+            echo "                            DOCKER BUILD GRAVITEE AM GATEWAY : "
             echo " [--------------------------------------------------------------------------------] "
+            docker build -f docker/gateway/Dockerfile-nightly --build-arg GRAVITEEAM_VERSION=${RELEASE_VERSION} -t graviteeio/am-gateway:nightly docker/gateway/
+            docker images
             echo " [--------------------------------------------------------------------------------] "
-            echo "                            FOR THE DOCKER RELEASE : "
-            echo "                                "
+            echo "                            DOCKER BUILD GRAVITEE AM MANAGEMENT API : "
             echo " [--------------------------------------------------------------------------------] "
-            echo "      RELEASE_VERSION=[${RELEASE_VERSION}]"
-            echo "      RELEASE_VERSION_MAJOR=[${RELEASE_VERSION_MAJOR}]"
-            echo "      RELEASE_VERSION_MINOR=[${RELEASE_VERSION_MINOR}]"
-            echo "      RELEASE_VERSION_PATCH=[${RELEASE_VERSION_PATCH}]"
+            docker build -f docker/management-api/Dockerfile-nightly --build-arg GRAVITEEAM_VERSION=${RELEASE_VERSION} -t graviteeio/am-management-api:nightly docker/management-api/
+            docker images
             echo " [--------------------------------------------------------------------------------] "
+            echo "                            DOCKER BUILD GRAVITEE AM MANAGEMENT UI : "
             echo " [--------------------------------------------------------------------------------] "
-            echo " [--------------------------------------------------------------------------------] "
-            #
-            # Secure docker images tagging
-            if ! [ "${RELEASE_VERSION}" == "${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}.${RELEASE_VERSION_PATCH}" ]; then
-              echo "[${RELEASE_VERSION}] and [${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}.${RELEASE_VERSION_PATCH}] should be equal, and are not, stopping pipeline, debug and check pipeline."
-              exit 3
-            fi;
+            docker build -f docker/management-ui/Dockerfile-nightly --build-arg GRAVITEEAM_VERSION=${RELEASE_VERSION} -t graviteeio/am-management-ui:nightly docker/management-ui/
+            docker images
+
+      - run:
+          name: "Docker Push Nightly Images to Docker Hub"
+          command: |
+            docker images
             echo " [--------------------------------------------------------------------------------] "
             echo "                            DOCKER LOGIN : "
             echo " [--------------------------------------------------------------------------------] "
@@ -538,40 +548,44 @@ jobs:
             ls -allh /tmp/gravit33bot/.secrets/dockerhub/user_token
             export DOCKERHUB_USER_NAME=$(cat /tmp/gravit33bot/.secrets/dockerhub/user_name)
             export DOCKERHUB_USER_TOKEN=$(cat /tmp/gravit33bot/.secrets/dockerhub/user_token)
-            # docker login -u $(secrethub read graviteeio/cicd/graviteebot/infra/dockerhub-user-name) -p $(secrethub read graviteeio/cicd/graviteebot/infra/dockerhub-user-token)
             docker login -u ${DOCKERHUB_USER_NAME} -p ${DOCKERHUB_USER_TOKEN}
-            echo " [--------------------------------------------------------------------------------] "
-            echo "                            DOCKER BUILD GRAVITEE AM CONTAINER IMAGES : "
-            echo " [--------------------------------------------------------------------------------] "
-            echo "Not implemented yet"
-            exit 1
-            docker build -f docker/management-api/Dockerfile-dev --build-arg GRAVITEE_COCKPIT_VERSION=${RELEASE_VERSION} -t graviteeio/cockpit-management-api:${RELEASE_VERSION} docker/management-api/
-            docker tag graviteeio/cockpit-management-api:${RELEASE_VERSION} graviteeio/cockpit-management-api:latest
-            docker tag graviteeio/cockpit-management-api:${RELEASE_VERSION} graviteeio/cockpit-management-api:"${RELEASE_VERSION_MAJOR}"
-            docker tag graviteeio/cockpit-management-api:${RELEASE_VERSION} graviteeio/cockpit-management-api:"${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}"
-            docker images
+            echo " [++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++] "
             echo " [--------------------------------------------------------------------------------] "
             echo "                            DOCKER PUSH GRAVITEE AM CONTAINER IMAGES : "
+            echo " [--------------------------------------------------------------------------------] "
+            echo " [++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++] "
+
+            echo " [--------------------------------------------------------------------------------] "
+            echo "                            DOCKER PUSH GRAVITEE AM GATEWAY : "
+            echo " [--------------------------------------------------------------------------------] "
+            if [ "${DRY_RUN}" == "false" ]; then
+              # --->>> NO IT IS NOT A DRY RUN
+              echo "# --->>> NO IT IS NOT A DRY RUN : GO DOCKER PUSH"
+              docker push graviteeio/am-gateway:nightly
+            else
+              echo "# --->>> THIS IS A DRY RUN : SKIPPING DOCKER PUSH"
+            fi;
+            echo " [--------------------------------------------------------------------------------] "
+            echo "                            DOCKER PUSH GRAVITEE AM MANAGEMENT API : "
+            echo " [--------------------------------------------------------------------------------] "
+            if [ "${DRY_RUN}" == "false" ]; then
+              # --->>> NO IT IS NOT A DRY RUN
+              echo "# --->>> NO IT IS NOT A DRY RUN : GO DOCKER PUSH"
+              docker push graviteeio/am-management-api:nightly
+            else
+              echo "# --->>> THIS IS A DRY RUN : SKIPPING DOCKER PUSH"
+            fi;
+            echo " [--------------------------------------------------------------------------------] "
+            echo "                            DOCKER PUSH GRAVITEE AM MANAGEMENT UI : "
             echo " [--------------------------------------------------------------------------------] "
 
             if [ "${DRY_RUN}" == "false" ]; then
               # --->>> NO IT IS NOT A DRY RUN
               echo "# --->>> NO IT IS NOT A DRY RUN : GO DOCKER PUSH"
-              if [ "${IS_A_LATEST}" == "true" ]; then
-                # --->>> NO IT IS NOT A DRY RUN
-                echo "# --->>> NO IT IS NOT A DRY RUN : THIS IS A LATEST RELEASE"
-                docker push graviteeio/cockpit-management-api:latest
-                docker push graviteeio/cockpit-management-api:"${RELEASE_VERSION_MAJOR}"
-                docker push graviteeio/cockpit-management-api:"${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}"
-                docker push graviteeio/cockpit-management-api:${RELEASE_VERSION}
-              else
-                echo "# --->>> THIS IS A DRY RUN : THIS IS NOT A LATEST RELEASE, SO WILL DOCKER PUSH ONLY [${RELEASE_VERSION}]=[${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}.${RELEASE_VERSION_PATCH}]"
-                docker push graviteeio/cockpit-management-api:"${RELEASE_VERSION_MAJOR}.${RELEASE_VERSION_MINOR}"
-              fi;
+              docker push graviteeio/am-management-ui:nightly
             else
               echo "# --->>> THIS IS A DRY RUN : SKIPPING DOCKER PUSH"
             fi;
-
 workflows:
   version: 2.1
 
@@ -595,7 +609,6 @@ workflows:
               ignore:
                 - master
   release:
-    # see https://circleci.com/docs/2.0/configuration-reference/#logic-statement-examples
     when:
       equal: [ release, << pipeline.parameters.gio_action >> ]
     jobs:
@@ -604,3 +617,18 @@ workflows:
       - release_job:
           requires:
             - secrethub
+
+  docker_nightly:
+      - secrethub:
+          context: cicd-orchestrator
+      - docker_nightly_job_approval:
+          type: approval
+          requires:
+            - secrethub
+      - docker_nightly_job:
+          requires:
+            - docker_nightly_job_approval
+          filters:
+            branches:
+              only:
+                - master
