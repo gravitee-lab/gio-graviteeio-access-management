@@ -620,6 +620,7 @@ workflows:
             - secrethub
 
   docker_nightly:
+    jobs:
       - secrethub:
           context: cicd-orchestrator
       - docker_nightly_job_approval:
