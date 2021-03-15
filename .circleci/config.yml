@@ -507,6 +507,7 @@ jobs:
     environment:
       DRY_RUN: << pipeline.parameters.dry_run >>
       GRAVITEEAM_VERSION: << pipeline.parameters.graviteeio_version >>
+    steps:
       # +++ #
       # +++ # The Docker Nightly release must happen after the [nexus staging]
       # +++ #
