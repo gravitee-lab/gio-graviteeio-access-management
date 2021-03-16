@@ -3,7 +3,7 @@ version: 2.1
 parameters:
   gio_action:
     type: enum
-    enum: [release, pr_build]
+    enum: [release, publish_rpms, pr_build]
     default: pr_build
   dry_run:
     type: boolean
@@ -634,3 +634,13 @@ workflows:
             branches:
               only:
                 - master
+
+  publish_rpms:
+    when:
+      equal: [ publish_rpms, << pipeline.parameters.gio_action >> ]
+    jobs:
+      - gravitee/publish_am_rpms:
+          context: cicd-orchestrator
+          secrethub_org: graviteeio
+          secrethub_repo: cicd
+          gio_release_version: << pipeline.parameters.gio_release_version >>
