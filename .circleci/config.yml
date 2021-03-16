@@ -643,4 +643,4 @@ workflows:
           context: cicd-orchestrator
           secrethub_org: graviteeio
           secrethub_repo: cicd
-          gio_release_version: << pipeline.parameters.gio_release_version >>
+          gio_release_version: << pipeline.parameters.graviteeio_version >>
