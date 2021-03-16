@@ -623,10 +623,18 @@ workflows:
     jobs:
       - secrethub:
           context: cicd-orchestrator
+          filters:
+            branches:
+              only:
+                - master
       - docker_nightly_job_approval:
           type: approval
           requires:
             - secrethub
+          filters:
+            branches:
+              only:
+                - master
       - docker_nightly_job:
           requires:
             - docker_nightly_job_approval
